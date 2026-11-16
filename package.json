@@ -6,20 +6,30 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "postbuild": "node scripts/inject-shell.mjs",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@react-three/drei": "^10.0.6",
+    "@react-three/fiber": "^9.1.0",
+    "earcut": "^3.0.2",
+    "lucide-react": "^0.468.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "three": "0.170.0",
+    "zod": "^3.24.1",
     "zustand": "5.0.2"
   },
   "devDependencies": {
+    "@types/earcut": "^2.1.4",
     "@types/react": "19.1.0",
     "@types/react-dom": "19.1.0",
     "@types/three": "0.170.0",
     "@vitejs/plugin-react": "4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
     "typescript": "5.7.2",
     "vite": "6.0.5"
   }

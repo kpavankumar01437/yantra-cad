@@ -1,21 +1,20 @@
 import * as THREE from 'three';
-import type { PlaneId, Sketch, Vec2 } from '../types';
+import earcut from 'earcut';
+import type { PlaneId, Vec2, Vec3 } from '../types';
 
-/** A resolved, renderable description of one solid body.
- *  Produced by the regeneration pipeline from the feature history.
- */
+/** Renderable description of one solid, produced by feature regeneration. */
 export type SolidSpec = {
   plane: PlaneId;
-  /** Closed profile in sketch-local millimetres (CCW). */
+  /** Outer closed profile, sketch-local millimetres. */
   polygon: Vec2[];
+  /** Inner closed profiles (holes), sketch-local millimetres. */
+  holes?: Vec2[][];
   z0: number;
   z1: number;
   /** Wall thickness for a shelled body (open top). */
   shell?: number;
-  transform: { x: number; y: number; z: number };
+  transform: Vec3;
 };
-
-export type SketchLines = { lines: [Vec2, Vec2][]; circles: { c: Vec2; r: number }[] };
 
 const EPS = 1e-9;
 
@@ -55,91 +54,32 @@ export function ensureCCW(poly: Vec2[]): Vec2[] {
   return polygonArea(poly) < 0 ? [...poly].reverse() : poly;
 }
 
-export function sketchToLines(sketch: Sketch): SketchLines {
-  const lines: [Vec2, Vec2][] = [];
-  const circles: { c: Vec2; r: number }[] = [];
-  for (const entity of sketch.entities) {
-    if (entity.kind === 'rect') {
-      const p = rectPolygon(entity.a, entity.b);
-      for (let i = 0; i < p.length; i += 1) lines.push([p[i], p[(i + 1) % p.length]]);
-    } else if (entity.kind === 'circle') {
-      circles.push({ c: entity.c, r: entity.r });
-    } else {
-      lines.push([entity.a, entity.b]);
-    }
+export function pointInPolygon(p: Vec2, poly: Vec2[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i, i += 1) {
+    const a = poly[i];
+    const b = poly[j];
+    const intersects = a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y || EPS) + a.x;
+    if (intersects) inside = !inside;
   }
-  return { lines, circles };
+  return inside;
 }
 
-/** First closed profile found in a sketch, if any. */
-export function profileOf(sketch: Sketch): { polygon: Vec2[] } | { error: string } {
-  const rect = sketch.entities.find((e) => e.kind === 'rect');
-  if (rect && rect.kind === 'rect') {
-    const poly = rectPolygon(rect.a, rect.b);
-    if (Math.abs(polygonArea(poly)) < 0.01) return { error: 'Profile has no area' };
-    return { polygon: poly };
+/** Triangulate polygon with optional holes. Returns triangles referencing `vertices`. */
+export function triangulate2D(
+  polygon: Vec2[],
+  holes: Vec2[][] = [],
+): { indices: number[]; vertices: Vec2[] } {
+  const vertices: Vec2[] = [...polygon];
+  const holeIndices: number[] = [];
+  for (const hole of holes) {
+    holeIndices.push(vertices.length);
+    vertices.push(...hole);
   }
-  const circle = sketch.entities.find((e) => e.kind === 'circle');
-  if (circle && circle.kind === 'circle') {
-    if (circle.r < 0.05) return { error: 'Circle radius is too small' };
-    return { polygon: circlePolygon(circle.c, circle.r) };
-  }
-  const lines = sketch.entities.filter((e) => e.kind === 'line');
-  if (lines.length >= 3) {
-    const poly = lines.map((l) => (l.kind === 'line' ? l.a : { x: 0, y: 0 }));
-    if (Math.abs(polygonArea(poly)) > 0.01) return { polygon: poly };
-  }
-  return { error: 'Sketch has no closed profile to extrude' };
-}
-
-function pointInTriangle(p: Vec2, a: Vec2, b: Vec2, c: Vec2): boolean {
-  const d1 = (p.x - b.x) * (a.y - b.y) - (a.x - b.x) * (p.y - b.y);
-  const d2 = (p.x - c.x) * (b.y - c.y) - (b.x - c.x) * (p.y - c.y);
-  const d3 = (p.x - a.x) * (c.y - a.y) - (c.x - a.x) * (p.y - a.y);
-  const hasNeg = d1 < -EPS || d2 < -EPS || d3 < -EPS;
-  const hasPos = d1 > EPS || d2 > EPS || d3 > EPS;
-  return !(hasNeg && hasPos);
-}
-
-/** Ear-clipping triangulation of a simple CCW polygon. Returns index triples. */
-export function triangulate2D(poly: Vec2[]): number[] {
-  const n = poly.length;
-  if (n < 3) return [];
-  const idx: number[] = [];
-  for (let i = 0; i < n; i += 1) idx.push(i);
-  const out: number[] = [];
-  let guard = 0;
-
-  while (idx.length > 3 && guard < 4000) {
-    guard += 1;
-    let clipped = false;
-    for (let i = 0; i < idx.length; i += 1) {
-      const i0 = idx[(i - 1 + idx.length) % idx.length];
-      const i1 = idx[i];
-      const i2 = idx[(i + 1) % idx.length];
-      const a = poly[i0];
-      const b = poly[i1];
-      const c = poly[i2];
-      const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-      if (cross <= EPS) continue;
-      let contains = false;
-      for (const j of idx) {
-        if (j === i0 || j === i1 || j === i2) continue;
-        if (pointInTriangle(poly[j], a, b, c)) {
-          contains = true;
-          break;
-        }
-      }
-      if (contains) continue;
-      out.push(i0, i1, i2);
-      idx.splice(i, 1);
-      clipped = true;
-      break;
-    }
-    if (!clipped) break;
-  }
-  if (idx.length === 3) out.push(idx[0], idx[1], idx[2]);
-  return out;
+  const flat: number[] = [];
+  for (const v of vertices) flat.push(v.x, v.y);
+  const indices = (earcut(flat, holeIndices.length ? holeIndices : undefined, 2) as number[]) ?? [];
+  return { indices, vertices };
 }
 
 function inwardNormal(a: Vec2, b: Vec2): Vec2 {
@@ -181,14 +121,13 @@ export function offsetPolygon(poly: Vec2[], d: number): Vec2[] {
   return out;
 }
 
-/** Round every convex corner of a CCW polygon with radius `r` (profile fillet). */
+/** Round every convex corner of a CCW polygon (profile fillet). */
 export function roundPolygon(poly: Vec2[], radius: number): { poly: Vec2[]; clamped: boolean } {
   if (radius <= 0.01) return { poly, clamped: false };
   const n = poly.length;
   let r = radius;
   let clamped = false;
 
-  // Clamp so neighbouring corners cannot consume the same edge.
   for (let i = 0; i < n; i += 1) {
     const prev = poly[(i - 1 + n) % n];
     const cur = poly[i];
@@ -220,12 +159,10 @@ export function roundPolygon(poly: Vec2[], radius: number): { poly: Vec2[]; clam
     const u2 = { x: v2.x / l2, y: v2.y / l2 };
     const cos = Math.min(1, Math.max(-1, u1.x * u2.x + u1.y * u2.y));
     const theta = Math.acos(cos);
-
     if (theta < 1e-3 || Math.PI - theta < 1e-3) {
       out.push(cur);
       continue;
     }
-
     const tangent = r / Math.tan(theta / 2);
     const bis = { x: u1.x + u2.x, y: u1.y + u2.y };
     const bisLen = Math.hypot(bis.x, bis.y) || 1;
@@ -236,13 +173,11 @@ export function roundPolygon(poly: Vec2[], radius: number): { poly: Vec2[]; clam
     };
     const t1 = { x: cur.x + u1.x * tangent, y: cur.y + u1.y * tangent };
     const t2 = { x: cur.x + u2.x * tangent, y: cur.y + u2.y * tangent };
-
     const a1 = Math.atan2(t1.y - center.y, t1.x - center.x);
     let sweep = Math.atan2(t2.y - center.y, t2.x - center.x) - a1;
     while (sweep > Math.PI) sweep -= Math.PI * 2;
     while (sweep < -Math.PI) sweep += Math.PI * 2;
     const steps = Math.max(2, Math.ceil(Math.abs(sweep) / (Math.PI / 24)));
-
     for (let s = 0; s <= steps; s += 1) {
       const ang = a1 + (sweep * s) / steps;
       out.push({ x: center.x + Math.cos(ang) * r, y: center.y + Math.sin(ang) * r });
@@ -269,66 +204,81 @@ export function planeNormalLocal(plane: PlaneId): THREE.Vector3 {
   return new THREE.Vector3(0, 0, 1);
 }
 
-/** Build renderable geometry for a solid spec (all units mm, model axes: Z up). */
+/** Build renderable geometry for a solid spec (model space, Z up). */
 export function buildSolidGeometry(spec: SolidSpec): THREE.BufferGeometry {
   const poly = ensureCCW(spec.polygon);
+  const holes = (spec.holes ?? []).filter((h) => h.length >= 3).map((h) => ensureCCW(h));
   const zLow = Math.min(spec.z0, spec.z1);
   const zHigh = Math.max(spec.z0, spec.z1);
+  const { indices, vertices } = triangulate2D(poly, holes);
   const positions: number[] = [];
 
-  const push = (x: number, y: number, z: number) => positions.push(x, y, z);
+  const push = (v: Vec2, z: number) => positions.push(v.x, v.y, z);
   const pushTri = (a: Vec2, b: Vec2, c: Vec2, z: number) => {
-    push(a.x, a.y, z);
-    push(b.x, b.y, z);
-    push(c.x, c.y, z);
+    push(a, z);
+    push(b, z);
+    push(c, z);
   };
 
-  const tri = triangulate2D(poly);
-  const shell = spec.shell && spec.shell > 0 ? spec.shell : 0;
-
-  // Bottom cap (outward normal -Z).
-  for (let i = 0; i < tri.length; i += 3) {
-    push(poly[tri[i]].x, poly[tri[i]].y, zLow);
-    push(poly[tri[i + 2]].x, poly[tri[i + 2]].y, zLow);
-    push(poly[tri[i + 1]].x, poly[tri[i + 1]].y, zLow);
-  }
+  const emitCap = (z: number, down: boolean) => {
+    for (let i = 0; i < indices.length; i += 3) {
+      const a = vertices[indices[i]];
+      const b = vertices[indices[i + 1]];
+      const c = vertices[indices[i + 2]];
+      const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+      const ccw = cross >= 0;
+      if (down) {
+        if (ccw) pushTri(a, c, b, z);
+        else pushTri(a, b, c, z);
+      } else if (ccw) {
+        pushTri(a, b, c, z);
+      } else {
+        pushTri(a, c, b, z);
+      }
+    }
+  };
 
   const wall = (loop: Vec2[], z0: number, z1: number, inward: boolean) => {
     for (let i = 0; i < loop.length; i += 1) {
       const a = loop[i];
       const b = loop[(i + 1) % loop.length];
       if (inward) {
-        push(b.x, b.y, z0);
-        push(a.x, a.y, z0);
-        push(a.x, a.y, z1);
-        push(b.x, b.y, z0);
-        push(a.x, a.y, z1);
-        push(b.x, b.y, z1);
+        push(b, z0);
+        push(a, z0);
+        push(a, z1);
+        push(b, z0);
+        push(a, z1);
+        push(b, z1);
       } else {
-        push(a.x, a.y, z0);
-        push(b.x, b.y, z0);
-        push(b.x, b.y, z1);
-        push(a.x, a.y, z0);
-        push(b.x, b.y, z1);
-        push(a.x, a.y, z1);
+        push(a, z0);
+        push(b, z0);
+        push(b, z1);
+        push(a, z0);
+        push(b, z1);
+        push(a, z1);
       }
     }
   };
 
+  const shell = spec.shell && spec.shell > 0 && holes.length === 0 ? spec.shell : 0;
+
+  emitCap(zLow, true);
   wall(poly, zLow, zHigh, false);
+  for (const hole of holes) wall(hole, zLow, zHigh, true);
 
   if (shell > 0) {
     const inner = offsetPolygon(poly, shell);
     const innerTri = triangulate2D(inner);
     const floor = zLow + shell;
-
-    // Inner floor, facing +Z.
-    for (let i = 0; i < innerTri.length; i += 3) {
-      pushTri(inner[innerTri[i]], inner[innerTri[i + 1]], inner[innerTri[i + 2]], floor);
+    for (let i = 0; i < innerTri.indices.length; i += 3) {
+      const a = innerTri.vertices[innerTri.indices[i]];
+      const b = innerTri.vertices[innerTri.indices[i + 1]];
+      const c = innerTri.vertices[innerTri.indices[i + 2]];
+      const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+      if (cross >= 0) pushTri(a, b, c, floor);
+      else pushTri(a, c, b, floor);
     }
-    // Inner walls seen from inside the cavity.
     wall(inner, floor, zHigh, true);
-    // Top rim between outer and inner loops.
     for (let i = 0; i < poly.length; i += 1) {
       const o0 = poly[i];
       const o1 = poly[(i + 1) % poly.length];
@@ -338,10 +288,7 @@ export function buildSolidGeometry(spec: SolidSpec): THREE.BufferGeometry {
       pushTri(o0, i1, i0, zHigh);
     }
   } else {
-    // Solid top cap (+Z).
-    for (let i = 0; i < tri.length; i += 3) {
-      pushTri(poly[tri[i]], poly[tri[i + 1]], poly[tri[i + 2]], zHigh);
-    }
+    emitCap(zHigh, false);
   }
 
   const geometry = new THREE.BufferGeometry();
@@ -371,13 +318,40 @@ export function geometryVolume(geometry: THREE.BufferGeometry): number {
   return Math.abs(total);
 }
 
-/** Area of the triangle behind a raycast face index (mm²). */
+/**
+ * Area of the planar region behind a raycast triangle index (mm²).
+ * The mesh is tessellated, so a CAD face is the set of coplanar triangles sharing a plane.
+ */
 export function faceArea(geometry: THREE.BufferGeometry, faceIndex: number): number {
   const pos = geometry.getAttribute('position');
+  const count = pos.count;
   const i = faceIndex * 3;
-  if (i + 2 >= pos.count) return 0;
+  if (i + 2 >= count) return 0;
+
   const a = new THREE.Vector3().fromBufferAttribute(pos, i);
   const b = new THREE.Vector3().fromBufferAttribute(pos, i + 1);
   const c = new THREE.Vector3().fromBufferAttribute(pos, i + 2);
-  return b.clone().sub(a).cross(c.clone().sub(a)).length() / 2;
+  const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
+  const length = normal.length();
+  if (length < 1e-9) return 0;
+  normal.divideScalar(length);
+  const planeOffset = normal.dot(a);
+
+  let area = 0;
+  const p0 = new THREE.Vector3();
+  const p1 = new THREE.Vector3();
+  const p2 = new THREE.Vector3();
+  const cross = new THREE.Vector3();
+  for (let t = 0; t + 2 < count; t += 3) {
+    p0.fromBufferAttribute(pos, t);
+    p1.fromBufferAttribute(pos, t + 1);
+    p2.fromBufferAttribute(pos, t + 2);
+    cross.subVectors(p1, p0).cross(new THREE.Vector3().subVectors(p2, p0));
+    const triLength = cross.length();
+    if (triLength < 1e-9) continue;
+    if (cross.divideScalar(triLength).dot(normal) <= 1 - 1e-4) continue;
+    if (Math.abs(p0.dot(normal) - planeOffset) > 1e-3) continue;
+    area += triLength / 2;
+  }
+  return area;
 }

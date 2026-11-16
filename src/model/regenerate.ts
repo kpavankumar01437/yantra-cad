@@ -1,13 +1,14 @@
-import type { Doc, Feature, FeatureStatus } from '../types';
+import { offsetPolygon, pointInPolygon, polygonArea, roundPolygon, type SolidSpec } from '../geometry/solid';
+import type { Design, Feature, FeatureStatus, Vec2 } from '../types';
 import { evaluate, parameterValues } from './expressions';
-import { offsetPolygon, polygonArea, profileOf, roundPolygon, type SolidSpec } from '../geometry/solid';
+import { profileOf } from './profile';
 
 export type BodySolid = {
   bodyId: string;
   featureId: string;
   componentId: string;
   spec: SolidSpec;
-  rounded?: boolean;
+  rounded: boolean;
 };
 
 export type Regenerated = {
@@ -19,18 +20,18 @@ export type Regenerated = {
 };
 
 /**
- * Replay the active timeline, turning features into solids.
- * This is the frontend's stand-in for the CAD kernel's feature regeneration:
- * it resolves parameters, evaluates features in order and reports per-feature status.
+ * Replay the active timeline, resolving parameters and producing solids.
+ * This is the stand-in for a CAD kernel's feature regeneration: the document holds
+ * intent, this function derives geometry, and every failure is reported per feature.
  */
-export function regenerate(doc: Doc): Regenerated {
-  const { values, errors: paramErrors } = parameterValues(doc.parameters);
+export function regenerate(design: Design): Regenerated {
+  const { values, errors: paramErrors } = parameterValues(design.parameters);
   const status: Record<string, FeatureStatus> = {};
   const bodies: Record<string, BodySolid> = {};
   const bodyOrder: string[] = [];
 
-  const limit = Math.max(0, Math.min(doc.rollback, doc.timeline.length));
-  const activeEntries = doc.timeline.slice(0, limit);
+  const limit = Math.max(0, Math.min(design.rollback, design.timeline.length));
+  const activeEntries = design.timeline.slice(0, limit);
 
   const evalExpr = (expr: string, featureId: string): number | null => {
     try {
@@ -52,38 +53,67 @@ export function regenerate(doc: Doc): Regenerated {
 
   for (const entry of activeEntries) {
     if (entry.type !== 'feature') continue;
-    const feature = doc.features.find((f) => f.id === entry.refId);
+    const feature = design.features.find((f) => f.id === entry.refId);
     if (!feature) continue;
+    if (feature.suppressed) {
+      status[feature.id] = { status: 'suppressed', message: 'Feature is suppressed' };
+      continue;
+    }
     if (status[feature.id]?.status === 'error') continue;
 
     if (feature.kind === 'extrude') {
-      const sketch = doc.sketches.find((s) => s.id === feature.sketchId);
+      const sketch = design.sketches.find((s) => s.id === feature.sketchId);
       if (!sketch) {
         fail(feature, 'Profile sketch was deleted');
         continue;
       }
-      const profile = profileOf(sketch);
-      if ('error' in profile) {
-        fail(feature, profile.error);
+      const resolved = profileOf(sketch);
+      if ('error' in resolved) {
+        fail(feature, resolved.error);
         continue;
       }
+      const { profile } = resolved;
       const distance = evalExpr(feature.distance, feature.id);
       if (distance === null) continue;
       if (Math.abs(distance) < 0.01) {
         fail(feature, 'Distance must be greater than zero');
         continue;
       }
+
+      if (feature.operation === 'cut') {
+        const target = bodies[feature.bodyId];
+        if (!target) {
+          fail(feature, 'Cut target body is unavailable');
+          continue;
+        }
+        if (target.spec.plane !== sketch.plane) {
+          fail(feature, `Cut sketch must lie on the ${target.spec.plane} plane`);
+          continue;
+        }
+        const outside = profile.polygon.some((point) => !pointInPolygon(point, target.spec.polygon));
+        if (outside) {
+          fail(feature, 'Cut profile must lie fully inside the target face');
+          continue;
+        }
+        const holes = target.spec.holes ?? [];
+        target.spec.holes = [...holes, profile.polygon, ...profile.holes];
+        continue;
+      }
+
       if (!bodies[feature.bodyId]) bodyOrder.push(feature.bodyId);
+      const component = design.components.find((c) => c.id === feature.componentId);
       bodies[feature.bodyId] = {
         bodyId: feature.bodyId,
         featureId: feature.id,
         componentId: feature.componentId,
+        rounded: false,
         spec: {
           plane: sketch.plane,
           polygon: profile.polygon,
+          holes: profile.holes.length ? profile.holes : undefined,
           z0: 0,
           z1: distance,
-          transform: { x: 0, y: 0, z: 0 },
+          transform: component ? { ...component.transform } : { x: 0, y: 0, z: 0 },
         },
       };
       continue;
@@ -106,14 +136,15 @@ export function regenerate(doc: Doc): Regenerated {
         status[feature.id] = { status: 'warning', message: 'Profile corners are already rounded' };
         continue;
       }
+      if (target.spec.holes?.length) {
+        status[feature.id] = { status: 'warning', message: 'Fillet is skipped for profiles with holes' };
+        continue;
+      }
       const rounded = roundPolygon(target.spec.polygon, radius);
       target.spec.polygon = rounded.poly;
       target.rounded = true;
       if (rounded.clamped) {
-        status[feature.id] = {
-          status: 'warning',
-          message: 'Radius was clamped so it fits the profile edges',
-        };
+        status[feature.id] = { status: 'warning', message: 'Radius was clamped to fit the profile edges' };
       }
       continue;
     }
@@ -130,10 +161,13 @@ export function regenerate(doc: Doc): Regenerated {
         fail(feature, `Wall thickness must be under ${(height / 2).toFixed(2)} mm`);
         continue;
       }
+      if (target.spec.holes?.length) {
+        status[feature.id] = { status: 'warning', message: 'Shell is skipped for profiles with holes' };
+        continue;
+      }
       const inner = offsetPolygon(target.spec.polygon, thickness);
       const outerArea = Math.abs(polygonArea(target.spec.polygon));
-      const innerArea = Math.abs(polygonArea(inner));
-      if (!(innerArea > outerArea * 0.02)) {
+      if (Math.abs(polygonArea(inner)) < outerArea * 0.02) {
         fail(feature, 'Wall thickness is too large for this profile');
         continue;
       }
@@ -141,19 +175,17 @@ export function regenerate(doc: Doc): Regenerated {
       continue;
     }
 
-    if (feature.kind === 'move') {
-      const x = evalExpr(feature.offset.x, feature.id);
-      if (x === null) continue;
-      const y = evalExpr(feature.offset.y, feature.id);
-      if (y === null) continue;
-      const z = evalExpr(feature.offset.z, feature.id);
-      if (z === null) continue;
-      target.spec.transform = {
-        x: target.spec.transform.x + x,
-        y: target.spec.transform.y + y,
-        z: target.spec.transform.z + z,
-      };
-    }
+    const x = evalExpr(feature.offset.x, feature.id);
+    if (x === null) continue;
+    const y = evalExpr(feature.offset.y, feature.id);
+    if (y === null) continue;
+    const z = evalExpr(feature.offset.z, feature.id);
+    if (z === null) continue;
+    target.spec.transform = {
+      x: target.spec.transform.x + x,
+      y: target.spec.transform.y + y,
+      z: target.spec.transform.z + z,
+    };
   }
 
   for (const entry of activeEntries) {
@@ -164,7 +196,9 @@ export function regenerate(doc: Doc): Regenerated {
   return { bodies, bodyOrder, status, paramValues: values, paramErrors };
 }
 
-/** Status of the feature that produced a body. */
-export function bodyStatus(regen: Regenerated, featureId: string): FeatureStatus {
-  return regen.status[featureId] ?? { status: 'ok' };
+/** Bounding helper used by the properties panel before geometry is built. */
+export function profileExtent(polygon: Vec2[]): { width: number; height: number } {
+  const xs = polygon.map((p) => p.x);
+  const ys = polygon.map((p) => p.y);
+  return { width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) };
 }

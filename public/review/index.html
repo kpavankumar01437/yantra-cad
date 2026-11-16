@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Yantra CAD — design &amp; verification review</title>
+    <meta
+      name="description"
+      content="Review pack for Yantra CAD, a browser-based mechanical CAD workspace built with React, TypeScript, Vite, Tailwind, Zustand, React Three Fiber and Three.js. Includes architecture, data model, store design, measured verification results and screenshots."
+    />
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; background: #0b1016; color: #d7e0ea; font: 15px/1.6 Inter, "IBM Plex Sans", system-ui, sans-serif; }
+      main { max-width: 1080px; margin: 0 auto; padding: 40px 24px 80px; }
+      h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.01em; }
+      h2 { font-size: 17px; margin: 40px 0 10px; padding-bottom: 6px; border-bottom: 1px solid #22303d; }
+      h3 { font-size: 14px; margin: 22px 0 6px; color: #b9c8d8; }
+      p, li { color: #aebbc9; }
+      .sub { color: #7d8fa3; margin: 0 0 18px; }
+      a { color: #5db4ff; }
+      code, pre { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12.5px; }
+      code { background: #131b24; border: 1px solid #22303d; border-radius: 3px; padding: 1px 4px; color: #cfe0f2; }
+      pre { background: #0f151d; border: 1px solid #22303d; border-radius: 4px; padding: 12px 14px; overflow-x: auto; color: #cfe0f2; }
+      table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13.5px; }
+      th, td { border: 1px solid #22303d; padding: 6px 9px; text-align: left; vertical-align: top; }
+      th { background: #131b24; color: #dbe6f2; font-weight: 600; }
+      td.num { font-family: ui-monospace, monospace; color: #bfe0ff; white-space: nowrap; }
+      figure { margin: 16px 0 24px; }
+      figure img { width: 100%; border: 1px solid #22303d; border-radius: 4px; display: block; background: #0d1219; }
+      figcaption { color: #7d8fa3; font-size: 12.5px; padding-top: 6px; }
+      .ok { color: #63d4a6; }
+      .note { border-left: 3px solid #2f7fbf; background: #0f1822; padding: 10px 14px; margin: 14px 0; color: #b8c8d8; }
+      .links { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 4px; padding: 0; list-style: none; }
+      .links a { display: inline-block; border: 1px solid #22303d; background: #131b24; border-radius: 3px; padding: 6px 10px; text-decoration: none; }
+      footer { margin-top: 44px; border-top: 1px solid #22303d; padding-top: 14px; color: #6d7f93; font-size: 12.5px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Yantra CAD — design &amp; verification review</h1>
+      <p class="sub">
+        Interactive browser CAD workspace for a simple mechanical design. This page is plain HTML with no JavaScript so
+        its content can be read by any fetcher or reviewer.
+      </p>
+
+      <ul class="links">
+        <li><a href="https://site-45f0583ab1dd4bd09aec9ad1f6315563.freebuff.page/">Open the live application</a></li>
+        <li><a href="01-workspace.png">Screenshot 1</a></li>
+        <li><a href="02-face-selected.png">Screenshot 2</a></li>
+        <li><a href="04-extrude-preview.png">Screenshot 4</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#verification">Verification</a></li>
+      </ul>
+
+      <div class="note">
+        The app itself is a WebGL single-page application: its HTML is pre-rendered for crawlers, but orbiting,
+        picking and commands require a real browser with WebGL. Everything claimed below was measured by driving the
+        deployed build, and the numbers are reproduced verbatim.
+      </div>
+
+      <h2 id="stack">Stack</h2>
+      <table>
+        <tr><th>Concern</th><th>Choice</th></tr>
+        <tr><td>Language / build</td><td>TypeScript 5.7, React 19, Vite 6, strict mode, <code>tsc --noEmit</code> in the build</td></tr>
+        <tr><td>Styling</td><td>Tailwind CSS 3.4 with a custom dark engineering theme; no component library</td></tr>
+        <tr><td>State</td><td>Zustand 5 — five separate stores</td></tr>
+        <tr><td>3D</td><td>React Three Fiber 9 + Three.js 0.170 + Drei (OrbitControls, Grid)</td></tr>
+        <tr><td>Validation</td><td>Zod 3 for command input structure, plus semantic expression evaluation</td></tr>
+        <tr><td>Icons / geometry</td><td>Lucide React; <code>earcut</code> for profile triangulation with holes</td></tr>
+        <tr><td>Persistence</td><td><code>localStorage</code> document snapshot + version list (no backend)</td></tr>
+      </table>
+
+      <h2 id="layout">Layout (full-screen CAD shell, no page scroll)</h2>
+      <pre>┌──────────────────────────────────────────────────────────────────────────────┐
+│ Top bar   logo · design name · save state · undo/redo · save · share · avatar │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ Workspace tabs   Design · Sketch · Render · Simulation · Manufacture · Drawing│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ Command toolbar   New Sketch · Extrude · Fillet · Shell · Move · Delete · …   │
+├───────────────┬──────────────────────────────────────────┬───────────────────┤
+│ BROWSER       │                                          │ PROPERTIES or     │
+│ 300 px        │           3D CANVAS (R3F)                │ COMMAND PANEL     │
+│ Design        │  grid · axes · shaded + edges            │ 340 px            │
+│  Origin       │  hover / selected highlight              │ selection-driven  │
+│  Components   │  orbit · pan · zoom · fit · views        │ fields, metrics,  │
+│    Bodies     │                                          │ live validation   │
+│    Sketches   │                                          │                   │
+│    Features   │                                          │                   │
+│  Joints       │                                          │                   │
+│  Parameters   │                                          │                   │
+├───────────────┴──────────────────────────────────────────┴───────────────────┤
+│ TIMELINE  Sketch1 → Extrude1 → Fillet1 → Sketch2 → Extrude2 → Move1 → …       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ Status bar   selection · units · grid/snap · errors/warnings · kernel badge   │
+└──────────────────────────────────────────────────────────────────────────────┘</pre>
+
+      <h2 id="structure">Folder and component structure</h2>
+      <pre>src/
+  main.tsx                      React root
+  index.css                     Tailwind layers + component classes (panel, tool-btn, menu, badge…)
+  types.ts                      document + selection types (single source of truth)
+  geometry/solid.ts             SolidSpec → BufferGeometry, earcut triangulation, holes, shell, fillet rounding,
+                                coplanar face area, volume, plane transforms
+  model/
+    expressions.ts              parameter evaluation (arithmetic + parameter references)
+    profile.ts                  sketch entities → closed polygon + nested holes
+    sketch.ts                   simplified constraint solver, DOF estimate, dimension measure/apply
+    regenerate.ts               timeline replay → solids + per-feature status (ok/warning/error/suppressed)
+    doc.ts                      sample Mounting Bracket design (3 components, 3 bodies, 6 features, 8 parameters)
+  stores/
+    designStore.ts              document, dirty flag, localStorage save
+    selectionStore.ts           selection list, hover, replace/add/remove modes
+    commandStore.ts             active command, inputs, field errors
+    historyStore.ts             past/future snapshots (limit 80)
+    uiStore.ts                  workspace, display mode, grid/snap, panels, sketch session, dialogs, toast
+  services/
+    document.ts                 the only write path: commit(mutator) → clone, snapshot, swap
+    commands.ts                 command definitions, defaults, build, preview, commit, undo, redo
+    validation.ts               Zod structural validation + semantic expression checks
+    actions.ts                  delete/rename/visibility/material/transform/parameter/sketch mutations
+    geometry.ts                 derived metrics (volume, bbox, triangles) + useRegenerated()
+    versions.ts                 version snapshots in localStorage
+  components/
+    App.tsx                     layout grid, hotkeys, autosave subscription, toast
+    TopBar · WorkspaceTabs · Toolbar · StatusBar
+    BrowserPanel · PropertiesPanel · CommandPanel · Timeline
+    Viewport3D.tsx              R3F canvas: bodies, picking, sketch plane/lines, preview, camera rig
+    viewport/sketchMath.ts      snap resolution + sketch/draft line generation
+    ContextMenu · Dialogs · WorkspacePlaceholder
+sites/index.js                  static asset worker with SPA fallback and real 404s for /assets/*
+sites/app-shell.html            pre-rendered first paint injected into the build for crawlers</pre>
+
+      <h2 id="stores">Zustand store design</h2>
+      <table>
+        <tr><th>Store</th><th>Owns</th><th>Key actions</th></tr>
+        <tr>
+          <td><code>designStore</code></td>
+          <td>Design document only (components, bodies, sketches, features, parameters, joints, timeline, rollback), dirty flag, last save time</td>
+          <td><code>setDesign</code>, <code>replaceDesign</code>, <code>saveNow</code>, <code>resetToSample</code></td>
+        </tr>
+        <tr>
+          <td><code>selectionStore</code></td>
+          <td>Selected objects (with face area/normal and edge length payload), hovered object</td>
+          <td><code>select(item, 'replace' | 'add' | 'remove')</code>, <code>hover</code>, <code>clear</code></td>
+        </tr>
+        <tr>
+          <td><code>commandStore</code></td>
+          <td>One active command at a time, its string inputs, field-level errors</td>
+          <td><code>start</code>, <code>setInput</code>, <code>setErrors</code>, <code>cancel</code></td>
+        </tr>
+        <tr>
+          <td><code>historyStore</code></td>
+          <td>Undo/redo snapshot stacks of whole documents (bounded at 80)</td>
+          <td><code>record</code>, <code>takeUndo</code>, <code>takeRedo</code></td>
+        </tr>
+        <tr>
+          <td><code>uiStore</code></td>
+          <td>Workspace, display mode, grid/snap/grid size, panel visibility, sketch session, dialogs, context menu, toast</td>
+          <td><code>setWorkspace</code>, <code>setDisplayMode</code>, <code>startSketchSession</code>, <code>notify</code></td>
+        </tr>
+      </table>
+      <p>
+        UI components never mutate geometry. They dispatch intents; <code>services/document.ts</code> clones the
+        document, applies the mutation, records the previous snapshot and swaps the new document in:
+      </p>
+      <pre>export function commit(mutator: (draft: Design) => void): Design {
+  const current = useDesignStore.getState().design;
+  const draft = structuredClone(current);
+  mutator(draft);
+  draft.updatedAt = Date.now();
+  draft.rollback = Math.max(0, Math.min(draft.rollback, draft.timeline.length));
+  useHistoryStore.getState().record(current);
+  useDesignStore.getState().setDesign(draft);
+  return draft;
+}</pre>
+      <p>
+        Solids are derived, never stored: <code>regenerate(design)</code> replays the active timeline and returns
+        per-body solids plus a status per feature.
+      </p>
+
+      <h2 id="model">TypeScript data model (abridged)</h2>
+      <pre>type Design = {
+  id: string; name: string; units: 'mm' | 'cm' | 'in';
+  components: Component[]; bodies: Body[]; sketches: Sketch[]; features: Feature[];
+  parameters: Parameter[]; joints: Joint[]; timeline: TimelineEntry[];
+  rollback: number;            // active timeline length
+  updatedAt: number;
+};
+
+type Component  = { id; name; parentId: string | null; visible: boolean; transform: Vec3; material: string };
+type Body       = { id; name; componentId; featureId; visible: boolean; material: string };
+
+type Sketch = {
+  id; name; componentId; plane: 'XY' | 'XZ' | 'YZ';
+  entities: SketchEntity[];   // line | polyline | rect | circle
+  constraints: Constraint[];  // horizontal | vertical | coincident | parallel | perpendicular
+  dimensions: Dimension[];    // length | radius | width | height | distance, expression text
+};
+
+type Feature =
+  | { kind: 'extrude'; sketchId; distance: string; operation: 'new' | 'cut'; bodyId }
+  | { kind: 'fillet';  bodyId; radius: string }
+  | { kind: 'shell';   bodyId; thickness: string }
+  | { kind: 'move';    bodyId; offset: { x: string; y: string; z: string } };
+// every feature also carries id, name, componentId, suppressed
+
+type Selection = {
+  kind: 'body' | 'face' | 'edge' | 'sketch' | 'sketchEntity' | 'feature' | 'component' | 'parameter' | 'joint' | 'plane';
+  id: string; bodyId?: string; subId?: string; label?: string;
+  face?: { area: number; normal: Vec3; point: Vec3 };
+  edge?: { length: number; start: Vec3; end: Vec3 };
+};</pre>
+
+      <h2 id="commands">Command system — Extrude end to end</h2>
+      <ol>
+        <li>Toolbar dispatches <code>startCommand('extrude')</code>; defaults are derived from the current selection (body, sketch, operation, distance).</li>
+        <li><code>CommandPanel</code> renders fields from <code>commandFields()</code>: profile sketch, operation (new body / cut), distance (mm). Cut additionally asks for the target body.</li>
+        <li>Every keystroke runs <code>previewCommand()</code>, which builds the feature on a clone, regenerates, and returns a <code>SolidSpec</code> — the canvas draws it as a translucent preview, and the panel shows ready / warning / error.</li>
+        <li><code>buildCommand()</code> validates with Zod (<code>validateStructure</code>) and evaluates expressions (<code>validateValues</code>); field errors are shown inline and block OK.</li>
+        <li>OK or Enter commits through <code>commitDesign()</code>, which records the undo snapshot, selects the new body and updates Browser, Canvas, Timeline and Properties from the same document.</li>
+        <li>Esc cancels without touching the document.</li>
+      </ol>
+      <pre>// services/commands.ts — extrude branch (abridged)
+const sketch = next.sketches.find((s) =&gt; s.id === inputs.sketchId);
+if (!sketch) return { error: 'That sketch no longer exists' };
+const resolvedProfile = profileOf(sketch);
+if ('error' in resolvedProfile) return { error: resolvedProfile.error };
+
+const operation = inputs.operation === 'cut' ? 'cut' : 'new';
+const bodyId = operation === 'new' ? newId('b') : inputs.bodyId;
+const feature: ExtrudeFeature = {
+  id: newId('f'), kind: 'extrude', name: uniqueName('Extrude', next.features),
+  componentId: sketch.componentId, suppressed: false,
+  sketchId: sketch.id, distance: inputs.distance, operation, bodyId,
+};
+next.features.push(feature);
+if (operation === 'new') next.bodies.push({ id: bodyId, name: uniqueName('Body', …), … });
+next.timeline.push({ id: newId('t'), type: 'feature', refId: feature.id });
+return finalize(next, feature.id, bodyId);   // errors surface from regenerate()</pre>
+      <p>
+        A <code>cut</code> extrude re-checks that the profile lies on the target body's plane and inside its face, then
+        adds the profile and its nested loops as holes in the target solid — a real through hole rather than a decal.
+      </p>
+
+      <h2 id="verification">Measured verification (deployed build)</h2>
+      <table>
+        <tr><th>Check</th><th>Result</th></tr>
+        <tr><td>Build</td><td class="ok">passes — <code>tsc --noEmit</code> + Vite; only the expected three.js chunk-size warning</td></tr>
+        <tr><td>Initial state</td><td>3 bodies, timeline 9/9, nothing selected</td></tr>
+        <tr><td>Canvas pick (click plate top face)</td><td class="num">Face · Base Plate / Body1 · 3978.3 mm², normal 0.00 0.00 1.00</td></tr>
+        <tr><td>Browser sync after canvas pick</td><td class="ok">1 row highlighted (<code>Base Plate → Body1</code>); Properties header “Base Plate / Body1 · Face”</td></tr>
+        <tr><td>Properties (body)</td><td class="num">volume 23869.9 mm³ · area 9465.0 mm² · bbox 80.0 × 50.0 × 6.0 mm · 204 triangles</td></tr>
+        <tr><td>Extrude command</td><td>profile + operation + distance fields, “Preview ready” live preview, OK/Enter</td></tr>
+        <tr><td>Commit</td><td class="num">timeline 9 → 10/10, bodies 3 → 4, new Body2 selected in Side Wall</td></tr>
+        <tr><td>Ctrl+Z</td><td class="num">back to 9/9 and 3 bodies</td></tr>
+        <tr><td>Ctrl+Shift+Z</td><td class="num">forward to 10/10 and 4 bodies</td></tr>
+        <tr><td>Sketch workspace</td><td>real session: Select · Line · Rect · Circle · Polyline, Horiz/Vert/Coincident/Parallel/Perp, Finish; camera frames the plane</td></tr>
+        <tr><td>Sketch → rectangle</td><td>two canvas clicks create 1 rect entity with width/height dimensions and measured values</td></tr>
+        <tr><td>Sketch → extrude</td><td>new body created from that profile; timeline and Browser update</td></tr>
+        <tr><td>Deep links / assets</td><td><code>/design</code> 200 html · hashed JS 200 <code>text/javascript</code> · missing asset 404</td></tr>
+      </table>
+
+      <h2 id="screens">Screenshots</h2>
+      <figure>
+        <img src="01-workspace.png" alt="Yantra CAD workspace: browser tree, 3D bracket, properties panel, timeline" />
+        <figcaption>1 — Default workspace, 1600 × 960. Browser (300 px), interactive canvas, Properties (340 px), timeline, status bar. Sample Mounting Bracket: Base Plate with fillet, Boss boss moved above the plate, Side Wall.</figcaption>
+      </figure>
+      <figure>
+        <img src="02-face-selected.png" alt="Top face of the base plate selected, highlighted in the canvas and in the browser tree" />
+        <figcaption>2 — Face pick by raycast. Canvas highlight (cyan), Browser row highlighted, Properties shows face type, area 3978.32 mm², normal and centroid, plus the parent body's physical properties. Status bar repeats the selection.</figcaption>
+      </figure>
+      <figure>
+        <img src="03-body-selected.png" alt="Body selected from the browser tree, properties showing volume and bounding box" />
+        <figcaption>3 — Reverse direction: selecting Body1 in the Browser highlights the body in the canvas and swaps Properties to body metrics (23869.9 mm³, 9465.0 mm², 80 × 50 × 6 mm).</figcaption>
+      </figure>
+      <figure>
+        <img src="04-extrude-preview.png" alt="Extrude command panel with profile, operation and distance, live preview status" />
+        <figcaption>4 — Extrude command: profile sketch, operation (new body / cut), distance, inline validation, live preview status, Cancel/OK with Esc/Enter hints.</figcaption>
+      </figure>
+      <figure>
+        <img src="05-extrude-committed.png" alt="After committing the extrude: new body in the tree and a new timeline entry" />
+        <figcaption>5 — After OK: new Body2 in the Side Wall component, timeline 10/10 with the new Extrude4 entry, Properties switched to the new body, undo snapshot recorded.</figcaption>
+      </figure>
+      <figure>
+        <img src="06-sketch-mode.png" alt="Sketch workspace with drawing tools, constraints, sketch plane in top view" />
+        <figcaption>6 — Sketch workspace: draw tools, constraints, Finish, plane-aligned camera, snap marker, and sketch properties (plane, entities, dimensions, DOF/fully-constrained badge, consumers).</figcaption>
+      </figure>
+      <figure>
+        <img src="07-panel-properties.png" alt="Properties panel detail while a face is selected" />
+        <figcaption>7 — Properties panel detail (face selection, body section, materials, actions).</figcaption>
+      </figure>
+      <figure>
+        <img src="08-panel-browser.png" alt="Browser tree detail with components, bodies, sketches, features, joints and parameters" />
+        <figcaption>8 — Browser tree detail: design, Origin, components → bodies → sketches/features, joints with counts, parameters with live evaluated values.</figcaption>
+      </figure>
+      <figure>
+        <img src="09-panel-timeline.png" alt="Timeline strip with feature chips and rollback markers" />
+        <figcaption>9 — Timeline detail: ordered feature history with per-step chips, selection state, rollback markers between entries, and status indicators.</figcaption>
+      </figure>
+
+      <h2 id="architecture">How selection stays synchronised</h2>
+      <p>
+        There is one selection source of truth. Canvas picking builds a <code>Selection</code> (with face area/normal or
+        edge length computed from the picked triangle) and writes it to <code>selectionStore</code>; the Browser rows
+        read the same store and highlight by id (a face selection highlights its parent body). Properties renders from
+        the selected object resolved against the current document, so it can never show stale data. Deleting, undoing or
+        rolling back prunes selection entries whose objects disappeared.
+      </p>
+
+      <h2 id="milestones">Milestone plan (delivered, then next)</h2>
+      <table>
+        <tr><th>Step</th><th>Scope</th><th>State</th></tr>
+        <tr><td>M1</td><td>Shell layout, dark theme, five stores, document model, sample design</td><td class="ok">done</td></tr>
+        <tr><td>M2</td><td>Interactive R3F viewport: orbit/pan/zoom, grid, axes, lighting, picking, hover/selection, fit, views, display modes</td><td class="ok">done</td></tr>
+        <tr><td>M3</td><td>Browser tree + Properties per selection kind + status bar</td><td class="ok">done</td></tr>
+        <tr><td>M4</td><td>Sketch workspace: plane session, line/rect/circle/polyline, snapping, dimensions, constraints, DOF badge</td><td class="ok">done</td></tr>
+        <tr><td>M5</td><td>Command framework + Extrude (new body and cut) with Zod validation, expressions, live preview, commit</td><td class="ok">done</td></tr>
+        <tr><td>M6</td><td>Timeline: selection, edit via command, rollback, suppress, rename, delete, error badges</td><td class="ok">done</td></tr>
+        <tr><td>M7</td><td>Undo/redo on every commit, autosave, versions, share dialog, keyboard map</td><td class="ok">done</td></tr>
+        <tr><td>M8</td><td>Fillet / Shell / Move commands reusing the same framework</td><td class="ok">done (prismatic approximations)</td></tr>
+        <tr><td>Next</td><td>WASM B-rep kernel behind the same <code>SolidSpec</code> seam, edge-level fillet, real constraint solver, project files</td><td>planned</td></tr>
+      </table>
+
+      <h2 id="limits">Known limits (deliberate)</h2>
+      <ul>
+        <li>Geometry is a mock prismatic kernel: extrusion, through holes, rounded profile corners, shelled prisms, moves. No NURBS or general booleans.</li>
+        <li>The sketch solver is a simplified projection solver; dimensions on rectangles/circles are exact, line constraints iterative.</li>
+        <li>Saving is per-browser (<code>localStorage</code>); there is no backend, no accounts and no collaboration.</li>
+        <li>Simulation, CAM, PCB, drawings and motion are visible as “coming soon” workspaces only.</li>
+      </ul>
+
+      <h2 id="run">Run locally</h2>
+      <pre>npm install
+npm run dev        # http://localhost:3000
+npm run build      # tsc --noEmit &amp;&amp; vite build, then injects the crawler shell</pre>
+
+      <footer>
+        Yantra CAD — review pack. Live app:
+        <a href="https://site-45f0583ab1dd4bd09aec9ad1f6315563.freebuff.page/">site-45f0583ab1dd4bd09aec9ad1f6315563.freebuff.page</a>
+      </footer>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,163 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    @apply bg-ink-950 text-slate-200 font-sans text-xs antialiased;
+    overflow: hidden;
+  }
+
+  ::selection {
+    background: rgba(53, 167, 255, 0.28);
+  }
+
+  input,
+  select,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  input[type='text'],
+  input[type='number'],
+  select {
+    @apply bg-ink-900 border border-line rounded text-slate-200 placeholder:text-slate-600;
+  }
+
+  input:focus,
+  select:focus {
+    outline: none;
+    @apply border-accent/70;
+    box-shadow: 0 0 0 2px rgba(53, 167, 255, 0.16);
+  }
+
+  ::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #263441;
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply flex min-h-0 flex-col bg-ink-900;
+  }
+
+  .panel-head {
+    @apply flex h-8 flex-none items-center gap-2 border-b border-line px-2;
+  }
+
+  .panel-title {
+    @apply text-3xs font-semibold uppercase tracking-[0.08em] text-slate-400;
+  }
+
+  .tool-btn {
+    @apply flex min-w-[44px] flex-col items-center gap-0.5 rounded px-1.5 py-1 text-3xs text-slate-400
+      transition-colors hover:bg-ink-750 hover:text-slate-100 disabled:opacity-30 disabled:hover:bg-transparent;
+  }
+
+  .tool-btn-active {
+    @apply bg-accent-soft text-accent hover:bg-accent-soft hover:text-accent;
+  }
+
+  .icon-btn {
+    @apply grid h-7 w-7 place-items-center rounded text-slate-400 transition-colors
+      hover:bg-ink-750 hover:text-slate-100 disabled:opacity-30 disabled:hover:bg-transparent;
+  }
+
+  .icon-btn-sm {
+    @apply grid h-[18px] w-[18px] place-items-center rounded text-slate-500 hover:bg-ink-700 hover:text-slate-200;
+  }
+
+  .field {
+    @apply w-full px-2 py-1 text-xs;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded border border-line bg-ink-750
+      px-2.5 py-1 text-xs text-slate-300 transition-colors hover:border-ink-500 hover:text-white
+      disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply border-accent bg-accent font-semibold text-ink-950 hover:bg-accent hover:text-ink-950 hover:brightness-110;
+  }
+
+  .btn-danger {
+    @apply text-red-300 hover:border-red-500/60 hover:text-red-200;
+  }
+
+  .kv {
+    @apply flex items-center justify-between gap-3 border-b border-dashed border-line/60 py-[3px];
+  }
+
+  .kv-label {
+    @apply flex-none text-2xs uppercase tracking-[0.04em] text-slate-500;
+  }
+
+  .kv-value {
+    @apply text-right font-mono text-[11px] text-slate-200;
+  }
+
+  .section-head {
+    @apply mb-1 mt-3 flex items-center gap-1.5 text-3xs font-semibold uppercase tracking-[0.08em] text-slate-500 first:mt-0;
+  }
+
+  .row {
+    @apply flex h-[22px] w-full items-center gap-1.5 rounded-sm px-1 text-left text-xs text-slate-300
+      hover:bg-ink-800;
+  }
+
+  .row-active {
+    @apply bg-accent-soft text-white hover:bg-accent-soft;
+  }
+
+  .chip {
+    @apply flex h-6 items-center gap-1.5 whitespace-nowrap rounded border border-line bg-ink-800
+      px-2 text-[11px] text-slate-300 hover:border-ink-500 hover:text-white;
+  }
+
+  .chip-active {
+    @apply border-accent/80 bg-accent-soft text-white;
+  }
+
+  .menu {
+    @apply min-w-[190px] rounded-md border border-line bg-ink-850 py-1 shadow-2xl;
+  }
+
+  .menu-item {
+    @apply flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs text-slate-300
+      hover:bg-ink-750 hover:text-white disabled:opacity-40 disabled:hover:bg-transparent;
+  }
+
+  .badge {
+    @apply rounded-full border px-1.5 text-3xs leading-[15px];
+  }
+
+  .field-error {
+    @apply text-2xs text-red-300;
+  }
+
+  .num {
+    @apply font-mono tabular-nums;
+  }
+}

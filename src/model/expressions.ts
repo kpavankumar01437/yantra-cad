@@ -1,8 +1,6 @@
 import type { Parameter } from '../types';
 
-/** Tiny expression language for dimensions: numbers, parameters, + - * / and parentheses.
- *  Units suffixes (mm) are tolerated and ignored — every value in the document is millimetres.
- */
+/** Minimal expression language: numbers, parameter names, + - * / and parentheses. */
 
 type Token = { t: 'num'; v: number } | { t: 'id'; v: string } | { t: 'op'; v: string };
 
@@ -44,12 +42,10 @@ function tokenize(src: string): Token[] {
   return out;
 }
 
-/** Evaluate an expression. `lookup` resolves identifiers (parameters). */
 export function evaluate(expr: string, lookup: (name: string) => number): number {
   const tokens = tokenize(expr);
   let pos = 0;
 
-  const peek = () => tokens[pos];
   const eat = (op: string) => {
     const tk = tokens[pos];
     if (tk && tk.t === 'op' && tk.v === op) {
@@ -109,15 +105,11 @@ export function evaluate(expr: string, lookup: (name: string) => number): number
   };
 
   const value = parseExpr();
-  if (pos !== tokens.length) {
-    const tk = peek();
-    throw new Error(`Unexpected "${tk ? tk.v : ''}"`);
-  }
+  if (pos !== tokens.length) throw new Error(`Unexpected "${tokens[pos]?.v ?? ''}"`);
   if (!Number.isFinite(value)) throw new Error('Result is not a finite number');
   return value;
 }
 
-/** Resolve every parameter, following references between parameters. */
 export function parameterValues(params: Parameter[]): {
   values: Record<string, number>;
   errors: Record<string, string>;

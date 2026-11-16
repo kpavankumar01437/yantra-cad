@@ -3,10 +3,40 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>YantraLab CAD — Design Workspace</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2.5l8.5 4.9v9.2L12 21.5 3.5 16.6V7.4L12 2.5z' fill='none' stroke='%237cc4ff' stroke-width='1.6'/%3E%3C/svg%3E"
+    />
+    <title>Yantra CAD — Design Workspace</title>
+    <meta
+      name="description"
+      content="Yantra CAD is a browser-based mechanical CAD workspace. Open the Mounting Bracket design, orbit a real 3D viewport, pick bodies, faces and edges, see volume and area in the properties panel, draw a sketch on a plane, extrude it, edit the distance from the feature timeline, and undo or redo every change."
+    />
+    <meta name="theme-color" content="#0b1016" />
+    <meta name="color-scheme" content="dark" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Yantra CAD — Design Workspace" />
+    <meta
+      property="og:description"
+      content="A browser CAD workspace for a simple mechanical design: 3D viewport with face and body selection, sketch and extrude, parametric feature history, undo/redo and local save."
+    />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Yantra CAD — Design Workspace" />
+    <meta
+      name="twitter:description"
+      content="Browser-based CAD: interactive 3D bracket assembly, sketch and extrude, editable feature timeline, undo/redo."
+    />
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <p>
+        Yantra CAD is an interactive 3D CAD workspace and needs JavaScript and WebGL to run. It models a sample
+        Mounting Bracket assembly (Base Plate, Boss and Side Wall) with sketched profiles, extruded bodies, a fillet,
+        shell and move features, a parametric feature timeline, and undo/redo. Enable JavaScript to open the
+        workspace.
+      </p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
